@@ -1,0 +1,101 @@
+# Copyright (c) 2022 Google Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining
+# a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including
+# without limitation the rights to use, copy, modify, merge, publish,
+# distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so, subject to
+# the following conditions:
+#
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+setup:
+  - command: [docker, network, create, -d, bridge, testbridge-$UNIQUE-id]
+  - command:
+    - 'docker'
+    - 'run'
+    - '--net'
+    - testbridge-$UNIQUE-id
+    - '--name'
+    - 'some-postgres-$UNIQUE-id'
+    - '-e'
+    - POSTGRES_USER=hydra
+    - '-e'
+    - POSTGRES_PASSWORD=secret
+    - '-e'
+    - POSTGRES_DB=hydra
+    - '-d'
+    - 'marketplace.gcr.io/google/postgresql:13.4'
+  - command: [sleep, 10s]
+
+# Running SQL migrations
+  - command:
+    - 'docker'
+    - 'run'
+    - '--net'
+    - testbridge-$UNIQUE-id
+    - '--name'
+    - 'some-hydra-sql-migration-$UNIQUE-id'
+    - '-d'
+    - '$IMAGE'
+    - 'migrate'
+    - 'sql'
+    - '--yes'
+    - postgres://hydra:secret@some-postgres-$UNIQUE-id:5432/hydra?sslmode=disable
+  - command: [sleep, 10s]
+
+  - command:
+    - 'docker'
+    - 'run'
+    - '--net'
+    - testbridge-$UNIQUE-id
+    - '--name'
+    - 'some-hydra-$UNIQUE-id'
+    - '-e'
+    - SECRETS_SYSTEM=3AD1LUmKa9ZMWFHeQ8uLdno8rX7haoog
+    - '-e'
+    - DSN=postgres://hydra:secret@some-postgres-$UNIQUE-id:5432/hydra?sslmode=disable
+    - '-e'
+    - URLS_SELF_ISSUER=https://localhost:5444/
+    - '-e'
+    - URLS_CONSENT=http://localhost:9020/consent
+    - '-e'
+    - URLS_LOGIN=http://localhost:9020/login
+    - '-d'
+    - '$IMAGE'
+    - serve
+    - all
+  - command: [sleep, 15s]
+
+teardown:
+  - command: [docker, stop, some-postgres-$UNIQUE-id]
+  - command: [docker, stop, some-hydra-sql-migration-$UNIQUE-id]
+  - command: [docker, stop, some-hydra-$UNIQUE-id]
+  - command: [docker, rm, some-postgres-$UNIQUE-id]
+  - command: [docker, rm, some-hydra-sql-migration-$UNIQUE-id]
+  - command: [docker, rm, some-hydra-$UNIQUE-id]
+  - command: [docker, network, rm, testbridge-$UNIQUE-id]
+
+target: some-hydra-$UNIQUE-id
+tests:
+  - name: Hydra Liveness Check
+    command: ['curl', '-k', 'https://localhost:4445/health/alive']
+    expect:
+      stdout:
+        matches: '{"status":"ok"}'
+
+  - name: Hydra Readiness Check
+    command: ['curl', '-k', 'https://localhost:4445/health/ready']
+    expect:
+      stdout:
+        matches: '{"status":"ok"}'
